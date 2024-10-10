@@ -1,0 +1,33 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0.0",
+	"FriendlyName": "SMLFeatureTests",
+	"Description": "Mod for testing SML features. Separate repo to not confuse modders and bloat the modding project.",
+	"Category": "Modding",
+	"CreatedBy": "SML Team",
+	"CreatedByURL": "https://github.com/satisfactorymodding/SMLFeatureTests",
+	"DocsURL": "https://docs.ficsit.app",
+	"MarketplaceURL": "",
+	"SupportURL": "",
+	"CanContainContent": true,
+	"IsBetaVersion": false,
+	"IsExperimentalVersion": false,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "SMLFeatureTests",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "SML",
+			"Enabled": true,
+			"SemVersion": "^3.8.0-dev"
+		}
+	],
+	"SemVersion": "1.0.0",
+	"GameVersion": ">=365306"
+}
