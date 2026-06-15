@@ -1,0 +1,515 @@
+#include "Features/SMLFeatureTestsNativeHooking.h"
+
+#include "Patching/NativeHookManager.h"
+
+UE_DISABLE_OPTIMIZATION_SHIP
+
+int USMLFeatureTestsNativeHooking::GetValueStatic(int AmountToAdd) { return DEFAULT_VALUE + AmountToAdd; }
+int USMLFeatureTestsNativeHooking::GetValueMember(int AmountToAdd) const { return DEFAULT_VALUE + AmountToAdd; }
+int USMLFeatureTestsNativeHooking::GetValueVirtual(int AmountToAdd) const { return DEFAULT_VALUE + AmountToAdd; }
+int USMLFeatureTestsNativeHooking::GetValueInterface(int AmountToAdd) const { return DEFAULT_VALUE + AmountToAdd; }
+auto USMLFeatureTestsNativeHooking::GetSmallStructStatic(int AmountToAdd) -> SmallStruct { return { .Value = DEFAULT_VALUE + AmountToAdd }; }
+auto USMLFeatureTestsNativeHooking::GetLargeStructStatic(int AmountToAdd) -> LargeStruct { return { .Value = DEFAULT_VALUE + AmountToAdd }; }
+auto USMLFeatureTestsNativeHooking::GetSmallStructMember(int AmountToAdd) const -> SmallStruct { return { .Value = DEFAULT_VALUE + AmountToAdd }; }
+auto USMLFeatureTestsNativeHooking::GetLargeStructMember(int AmountToAdd) const -> LargeStruct { return { .Value = DEFAULT_VALUE + AmountToAdd }; }
+
+void USMLFeatureTestsNativeHooking::RunTest()
+{
+	// These tests are run multiple times to ensure that there're no lingering issues with unhooking.
+	for (int i = 0; i < 3; ++i)
+	{
+		TestStandardHooks();
+		TestAfterHooks();
+		TestMultiHooks();
+		TestVtableHooks();
+		TestUFunctionHooks();
+	}
+}
+
+void USMLFeatureTestsNativeHooking::TestStandardHooks()
+{
+	// Static function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[](auto& Scope, int AmountToAdd)
+			{
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		check(GetValueStatic(8) == MODDED_VALUE + 8);
+		check(GetValueStatic(9) == MODDED_VALUE + 9);
+
+		Handle.Unsubscribe();
+
+		check(GetValueStatic(8) == DEFAULT_VALUE + 8);
+		check(GetValueStatic(9) == DEFAULT_VALUE + 9);
+	}
+
+	// Member function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueMember,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		check(GetValueMember(3) == MODDED_VALUE + 3);
+		check(GetValueMember(4) == MODDED_VALUE + 4);
+
+		Handle.Unsubscribe();
+
+		check(GetValueMember(3) == DEFAULT_VALUE + 3);
+		check(GetValueMember(4) == DEFAULT_VALUE + 4);
+	}
+
+	// Virtual function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD_VIRTUAL(USMLFeatureTestsNativeHooking::GetValueVirtual,
+			this,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		check(GetValueVirtual(6) == MODDED_VALUE + 6);
+		check(GetValueVirtual(7) == MODDED_VALUE + 7);
+
+		Handle.Unsubscribe();
+
+		check(GetValueVirtual(6) == DEFAULT_VALUE + 6);
+		check(GetValueVirtual(7) == DEFAULT_VALUE + 7);
+	}
+
+	// Virtual function on interface, using interface function pointer.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD_VIRTUAL(ISMLFeatureTestsNativeHookingInterface::GetValueInterface,
+			this,
+			[this](auto& Scope, const ISMLFeatureTestsNativeHookingInterface* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		const ISMLFeatureTestsNativeHookingInterface* ThisInterface = this;
+
+		check(ThisInterface->GetValueInterface(10) == MODDED_VALUE + 10);
+		check(ThisInterface->GetValueInterface(11) == MODDED_VALUE + 11);
+
+		Handle.Unsubscribe();
+
+		check(ThisInterface->GetValueInterface(10) == DEFAULT_VALUE + 10);
+		check(ThisInterface->GetValueInterface(11) == DEFAULT_VALUE + 11);
+	}
+
+	// Virtual function on interface, using derived class function pointer.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD_VIRTUAL(USMLFeatureTestsNativeHooking::GetValueInterface,
+			this,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		check(GetValueInterface(10) == MODDED_VALUE + 10);
+		check(GetValueInterface(11) == MODDED_VALUE + 11);
+
+		Handle.Unsubscribe();
+
+		check(GetValueInterface(10) == DEFAULT_VALUE + 10);
+		check(GetValueInterface(11) == DEFAULT_VALUE + 11);
+	}
+
+	// Virtual function on UObject.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_UOBJECT_METHOD(USMLFeatureTestsNativeHooking, GetValueVirtual,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		check(GetValueVirtual(8) == MODDED_VALUE + 8);
+		check(GetValueVirtual(9) == MODDED_VALUE + 9);
+
+		Handle.Unsubscribe();
+
+		check(GetValueVirtual(8) == DEFAULT_VALUE + 8);
+		check(GetValueVirtual(9) == DEFAULT_VALUE + 9);
+	}
+
+	// Small struct from static function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetSmallStructStatic,
+			[](auto& Scope, int AmountToAdd)
+			{
+				Scope.Override({ .Value = MODDED_VALUE + AmountToAdd });
+			});
+
+		check(GetSmallStructStatic(12).Value == MODDED_VALUE + 12);
+		check(GetSmallStructStatic(13).Value == MODDED_VALUE + 13);
+
+		Handle.Unsubscribe();
+
+		check(GetSmallStructStatic(12).Value == DEFAULT_VALUE + 12);
+		check(GetSmallStructStatic(13).Value == DEFAULT_VALUE + 13);
+	}
+
+	// Small struct from member function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetSmallStructMember,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override({ .Value = MODDED_VALUE + AmountToAdd });
+			});
+
+		check(GetSmallStructMember(12).Value == MODDED_VALUE + 12);
+		check(GetSmallStructMember(13).Value == MODDED_VALUE + 13);
+
+		Handle.Unsubscribe();
+
+		check(GetSmallStructMember(12).Value == DEFAULT_VALUE + 12);
+		check(GetSmallStructMember(13).Value == DEFAULT_VALUE + 13);
+	}
+
+	// Large struct from static function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetLargeStructStatic,
+			[](auto& Scope, int AmountToAdd)
+			{
+				Scope.Override({ .Value = MODDED_VALUE + AmountToAdd });
+			});
+
+		check(GetLargeStructStatic(12).Value == MODDED_VALUE + 12);
+		check(GetLargeStructStatic(13).Value == MODDED_VALUE + 13);
+
+		Handle.Unsubscribe();
+
+		check(GetLargeStructStatic(12).Value == DEFAULT_VALUE + 12);
+		check(GetLargeStructStatic(13).Value == DEFAULT_VALUE + 13);
+	}
+
+	// Large struct from member function.
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetLargeStructMember,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override({ .Value = MODDED_VALUE + AmountToAdd });
+			});
+
+		check(GetLargeStructMember(12).Value == MODDED_VALUE + 12);
+		check(GetLargeStructMember(13).Value == MODDED_VALUE + 13);
+
+		Handle.Unsubscribe();
+
+		check(GetLargeStructMember(12).Value == DEFAULT_VALUE + 12);
+		check(GetLargeStructMember(13).Value == DEFAULT_VALUE + 13);
+	}
+}
+
+void USMLFeatureTestsNativeHooking::TestAfterHooks()
+{
+	// After static function.
+	{
+		unsigned CalledHandler = 0;
+		int ExpectedResult = -1;
+		int ExpectedAmountToAdd = -1;
+
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD_AFTER(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](int Result, int AmountToAdd)
+			{
+				++CalledHandler;
+				checkf(Result == ExpectedResult,
+					TEXT("Expected %u, got %u"), ExpectedResult, Result);
+				checkf(AmountToAdd == ExpectedAmountToAdd,
+					TEXT("Expected %u, got %u"), ExpectedAmountToAdd, AmountToAdd);
+			});
+
+		auto DoTest = [&](int AmountToAdd, bool IsHooked)
+		{
+			ExpectedAmountToAdd = AmountToAdd;
+			ExpectedResult = DEFAULT_VALUE + AmountToAdd;
+			check(GetValueStatic(AmountToAdd) == ExpectedResult);
+			check(CalledHandler == static_cast<unsigned>(IsHooked));
+			CalledHandler = 0;
+		};
+
+		DoTest(101, true);
+		DoTest(102, true);
+
+		Handle.Unsubscribe();
+
+		DoTest(101, false);
+		DoTest(102, false);
+	}
+
+	// After member function.
+	{
+		unsigned CalledHandler = 0;
+		int ExpectedResult = -1;
+		int ExpectedAmountToAdd = -1;
+
+		FNativeHookHandle Handle = SUBSCRIBE_METHOD_AFTER(USMLFeatureTestsNativeHooking::GetValueMember,
+			[&](int Result, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				++CalledHandler;
+				check(Self == this);
+				checkf(Result == ExpectedResult,
+					TEXT("Expected %u, got %u"), ExpectedResult, Result);
+				checkf(AmountToAdd == ExpectedAmountToAdd,
+					TEXT("Expected %u, got %u"), ExpectedAmountToAdd, AmountToAdd);
+			});
+
+		auto DoTest = [&](int AmountToAdd, bool IsHooked)
+		{
+			ExpectedAmountToAdd = AmountToAdd;
+			ExpectedResult = DEFAULT_VALUE + AmountToAdd;
+			check(GetValueMember(AmountToAdd) == ExpectedResult);
+			check(CalledHandler == static_cast<unsigned>(IsHooked));
+			CalledHandler = 0;
+		};
+
+		DoTest(101, true);
+		DoTest(102, true);
+
+		Handle.Unsubscribe();
+
+		DoTest(101, false);
+		DoTest(102, false);
+	}
+}
+
+void USMLFeatureTestsNativeHooking::TestMultiHooks()
+{
+	// Two hooks that should both run.
+	{
+		unsigned CalledHandler1 = 0;
+		unsigned CalledHandler2 = 0;
+
+		FNativeHookHandle Handle1 = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](auto& Scope, int AmountToAdd)
+			{
+				++CalledHandler1;
+				Scope.Override(Scope(AmountToAdd) * 2);
+			});
+		FNativeHookHandle Handle2 = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](auto& Scope, int AmountToAdd)
+			{
+				++CalledHandler2;
+				Scope.Override(Scope(AmountToAdd) * 3);
+			});
+
+		// Both handlers should multiply the result.
+		check(GetValueStatic(10) == (DEFAULT_VALUE + 10) * 6);
+		check(CalledHandler1 == 1);
+		check(CalledHandler2 == 1);
+		CalledHandler1 = CalledHandler2 = 0;
+		check(GetValueStatic(21) == (DEFAULT_VALUE + 21) * 6);
+		check(CalledHandler1 == 1);
+		check(CalledHandler2 == 1);
+		CalledHandler1 = CalledHandler2 = 0;
+
+		Handle1.Unsubscribe();
+
+		// One handler is unregistered, only one of them multiplies the result.
+		check(GetValueStatic(10) == (DEFAULT_VALUE + 10) * 3);
+		check(CalledHandler1 == 0);
+		check(CalledHandler2 == 1);
+		CalledHandler1 = CalledHandler2 = 0;
+		check(GetValueStatic(21) == (DEFAULT_VALUE + 21) * 3);
+		check(CalledHandler1 == 0);
+		check(CalledHandler2 == 1);
+		CalledHandler1 = CalledHandler2 = 0;
+
+		Handle2.Unsubscribe();
+
+		// All unregistered, everything should be back to normal.
+		check(GetValueStatic(10) == DEFAULT_VALUE + 10);
+		check(CalledHandler1 == 0);
+		check(CalledHandler2 == 0);
+		check(GetValueStatic(21) == DEFAULT_VALUE + 21);
+		check(CalledHandler1 == 0);
+		check(CalledHandler2 == 0);
+	}
+
+	// Hook that never calls the second handler.
+	{
+		FNativeHookHandle Handle1 = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](auto& Scope, int AmountToAdd)
+			{
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+		FNativeHookHandle Handle2 = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](auto& Scope, int AmountToAdd)
+			{
+				check(false);
+			});
+
+		check(GetValueStatic(5) == MODDED_VALUE + 5);
+		check(GetValueStatic(50) == MODDED_VALUE + 50);
+
+		Handle1.Unsubscribe();
+		Handle2.Unsubscribe();
+
+		check(GetValueStatic(5) == DEFAULT_VALUE + 5);
+		check(GetValueStatic(50) == DEFAULT_VALUE + 50);
+	}
+
+	// Hook that changes a parameter and passes that down the chain.
+	{
+		FNativeHookHandle Handle1 = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](auto& Scope, int AmountToAdd) { Scope.Override(Scope(AmountToAdd + 1) * 5); });
+		FNativeHookHandle Handle2 = SUBSCRIBE_METHOD(USMLFeatureTestsNativeHooking::GetValueStatic,
+			[&](auto& Scope, int AmountToAdd) { Scope.Override(Scope(AmountToAdd) * 6); });
+
+		check(GetValueStatic(25) == (DEFAULT_VALUE + 26) * 30);
+		check(GetValueStatic(22) == (DEFAULT_VALUE + 23) * 30);
+
+		Handle1.Unsubscribe();
+		Handle2.Unsubscribe();
+
+		check(GetValueStatic(25) == DEFAULT_VALUE + 25);
+		check(GetValueStatic(22) == DEFAULT_VALUE + 22);
+	}
+
+	// Hook the same virtual function but on two different derived classes.
+	{
+		struct Base { virtual FString GetName() = 0; };
+		struct Derived1 : Base { FString GetName() override { return "Derived1"; } };
+		struct Derived2 : Base { FString GetName() override { return "Derived2"; } };
+
+		Derived1 Obj1;
+		Derived2 Obj2;
+		unsigned CalledHandler1 = 0;
+		unsigned CalledHandler2 = 0;
+
+		FNativeHookHandle Handle1 = SUBSCRIBE_METHOD_VIRTUAL(Base::GetName, &Obj1,
+			[&](auto& Scope, Base* Obj)
+			{
+				check(Obj == &Obj1);
+				++CalledHandler1;
+			});
+
+		FNativeHookHandle Handle2 = SUBSCRIBE_METHOD_VIRTUAL(Base::GetName, &Obj2,
+			[&](auto& Scope, Base* Obj)
+			{
+				check(Obj == &Obj2);
+				++CalledHandler2;
+			});
+
+		check(static_cast<Base*>(&Obj1)->GetName() == "Derived1");
+		check(CalledHandler1 == 1);
+		check(CalledHandler2 == 0);
+		check(static_cast<Base*>(&Obj2)->GetName() == "Derived2");
+		check(CalledHandler1 == 1);
+		check(CalledHandler2 == 1);
+		CalledHandler1 = CalledHandler2 = 0;
+
+		Handle1.Unsubscribe();
+		Handle2.Unsubscribe();
+	}
+}
+
+void USMLFeatureTestsNativeHooking::TestVtableHooks()
+{
+	{
+		FNativeHookHandle Handle = SUBSCRIBE_VTABLE_ENTRY(USMLFeatureTestsNativeHooking::GetValueVirtual,
+			this,
+			[this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+			{
+				check(Self == this);
+				Scope.Override(MODDED_VALUE + AmountToAdd);
+			});
+
+		check(GetValueVirtual(23) == MODDED_VALUE + 23);
+		check(GetValueVirtual(24) == MODDED_VALUE + 24);
+
+		// Make sure that we haven't cheated by hooking the function normally, only dynamic dispatch should
+		// return a different result.
+		check(USMLFeatureTestsNativeHooking::GetValueVirtual(23) == DEFAULT_VALUE + 23);
+		check(USMLFeatureTestsNativeHooking::GetValueVirtual(24) == DEFAULT_VALUE + 24);
+
+		Handle.Unsubscribe();
+
+		check(GetValueVirtual(23) == DEFAULT_VALUE + 23);
+		check(GetValueVirtual(24) == DEFAULT_VALUE + 24);
+	}
+}
+
+void USMLFeatureTestsNativeHooking::TestUFunctionHooks()
+{
+	auto DoTest = [this](FName FunctionName, auto FunctionPointer, auto Subscribe)
+	{
+		static constexpr bool bIsMemberFunction = std::is_member_pointer_v<decltype(FunctionPointer)>;
+
+		auto DoCallNative = [this, FunctionPointer](int AmountToAdd)
+		{
+			if constexpr (bIsMemberFunction)
+			{
+				return (this->*FunctionPointer)(AmountToAdd);
+			}
+			else
+			{
+				return FunctionPointer(AmountToAdd);
+			}
+		};
+
+		auto DoCallReflection = [this, Function = FindFunctionChecked(FunctionName)](int AmountToAdd)
+		{
+			struct { int AmountToAdd, ReturnValue; } Params;
+			Params.AmountToAdd = AmountToAdd;
+			ProcessEvent(Function, &Params);
+			return Params.ReturnValue;
+		};
+
+		FNativeHookHandle Handle = Subscribe([this]
+		{
+			if constexpr (bIsMemberFunction)
+			{
+				return [this](auto& Scope, const USMLFeatureTestsNativeHooking* Self, int AmountToAdd)
+				{
+					check(Self == this);
+					Scope.Override(MODDED_VALUE + AmountToAdd);
+				};
+			}
+			else
+			{
+				return [](auto& Scope, int AmountToAdd)
+				{
+					Scope.Override(MODDED_VALUE + AmountToAdd);
+				};
+			}
+		}());
+
+		check(DoCallReflection(123) == MODDED_VALUE + 123);
+		check(DoCallReflection(456) == MODDED_VALUE + 456);
+
+		// Make sure that we haven't cheated by hooking the function normally, only dynamic dispatch should
+		// return a different result.
+		check(DoCallNative(123) == DEFAULT_VALUE + 123);
+		check(DoCallNative(456) == DEFAULT_VALUE + 456);
+
+		Handle.Unsubscribe();
+
+		check(DoCallReflection(123) == DEFAULT_VALUE + 123);
+		check(DoCallReflection(456) == DEFAULT_VALUE + 456);
+	};
+
+	// Static function.
+	DoTest(TEXT("GetValueStatic"), &USMLFeatureTestsNativeHooking::GetValueStatic,
+		[](auto Handler) { return SUBSCRIBE_UFUNCTION_VM(USMLFeatureTestsNativeHooking, GetValueStatic, Handler); });
+
+	// Member function.
+	DoTest(TEXT("GetValueMember"), &USMLFeatureTestsNativeHooking::GetValueMember,
+		[](auto Handler) { return SUBSCRIBE_UFUNCTION_VM(USMLFeatureTestsNativeHooking, GetValueMember, Handler); });
+
+	// Virtual function.
+	DoTest(TEXT("GetValueVirtual"), &USMLFeatureTestsNativeHooking::GetValueVirtual,
+		[](auto Handler) { return SUBSCRIBE_UFUNCTION_VM(USMLFeatureTestsNativeHooking, GetValueVirtual, Handler); });
+}
+
+UE_ENABLE_OPTIMIZATION_SHIP
